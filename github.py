@@ -32,7 +32,7 @@ SYMBOLS = [
     "SOL/USDT", "LINK/USDT", "JUP/USDT", "INJ/USDT", "TIA/USDT", "AVAX/USDT",
     "PAXG/USDT", "SOMI/USDT", "ADA/USDT", "FIL/USDT", "SUI/USDT", "WLD/USDT",
     "ARB/USDT", "CTSI/USDT", "TON/USDT", "PEPE/USDT", "TRUMP/USDT", "PYTH/USDT",
-    "FET/USDT", "SEI/USDT", "DOGE/USDT", "GRT/USDT", "ETC/USDT", "2Z/USDT"
+    "FET/USDT", "SEI/USDT", "DOGE/USDT", "GRT/USDT", "ETC/USDT","ONDO/USDT"
 ]
 
 TIMEFRAME   = "5m"      # 5m -> 15m (أهدأ)
@@ -738,5 +738,6 @@ def run_bot():
 if __name__ == "__main__":
 
     run_bot()
+
 
 
