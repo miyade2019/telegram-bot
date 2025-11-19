@@ -1,4 +1,4 @@
-# -- coding: utf-8 --
+# -*- coding: utf-8 -*-
 """
 بوت تداول إشارات + تيليغرام + رصد الحيتان + تعليم الأهداف + رسم بياني
 - يعمل 24/7
@@ -24,18 +24,14 @@ from matplotlib.patches import Rectangle
 
 # ==================== إعدادات عامة ====================
 API_KEY     = "8259936456:AAHYckhlv6swNQCPctBshVEI36qQw817zK4"   # مفاتيحك للتداول الحقيقي (إن أردت)
-API_SECRET  = "-1002711156609"
+#API_SECRET  = "-1002711156609"
+CHANNEL_ID = "-1003178511652"
+
 EXCHANGE_ID = "binance"
 
 # الأزواج
-SYMBOLS = [
-    "SOL/USDT", "LINK/USDT", "JUP/USDT", "INJ/USDT", "TIA/USDT", "AVAX/USDT",
-    "SOMI/USDT", "ADA/USDT", "FIL/USDT", "SUI/USDT", "WLD/USDT",
-    "ARB/USDT", "CTSI/USDT", "TON/USDT", "PEPE/USDT", "TRUMP/USDT", "PYTH/USDT",
-    "FET/USDT", "SEI/USDT", "DOGE/USDT", "GRT/USDT", "ETC/USDT","ONDO/USDT"
-]
-
-TIMEFRAME   = "5m"      # 5m -> 15m (أهدأ)
+SYMBOLS     = ["SOL/USDT","LINK/USDT","JUP/USDT","INJ/USDT","TIA/USDT","AVAX/USDT"]
+TIMEFRAME   = "5m"       # أسرع لإخراج إشارات
 FETCH_LIMIT = 300
 
 DRY_RUN       = True      # لا ينفّذ أوامر حقيقية
@@ -46,16 +42,16 @@ RISK_PER_TRADE       = 0.005  # 0.5% من رأس المال
 MAX_POSITION_PERCENT = 0.10   # 10% كحد أقصى للصفقة
 MIN_USDT_FOR_TRADE   = 10.0
 
-# ======== مؤشرات / عتبات (مشددة) ========
+# ======== مؤشرات / عتبات (مخففة) ========
 ATR_PERIOD            = 14
 SUPER_TREND_ATR_MULT  = 3.0
-TRAIL_ATR_MULT        = 2.5      # 2.0 -> 2.5
+TRAIL_ATR_MULT        = 2.0
 DONCHIAN_PERIOD       = 14
 ADX_PERIOD            = 14
-ADX_THRESHOLD         = 20       # 10 -> 20
+ADX_THRESHOLD         = 10      # أخفّ
 RSI_PERIOD            = 14
-RSI_ENTRY_LOW         = 35       # 25 -> 35
-RSI_ENTRY_HIGH        = 75       # 90 -> 75
+RSI_ENTRY_LOW         = 25      # 30 -> 25
+RSI_ENTRY_HIGH        = 90      # 85 -> 90
 EMA_FAST              = 20
 EMA_MED               = 50
 EMA_SLOW              = 200
@@ -65,19 +61,19 @@ MACD_SIGNAL           = 9
 STOCH_K               = 14
 STOCH_D               = 3
 VOL_MA                = 20
-MIN_VOL_RATIO         = 1.00     # 0.80 -> 1.00
+MIN_VOL_RATIO         = 0.80    # 0.95 -> 0.80
 
-# أهداف الربح (أقرب TP1 لتفعيل الإدارة مبكراً)
-TP_MULTS = [1.03, 1.06, 1.12]   # 3%، 6%، 12%
+# أهداف الربح
+TP_MULTS = [1.07, 1.10, 1.20]   # 7%، 10%، 20%
 
 # تقييد الضجيج
-COOLDOWN_MINUTES      = 45       # 20 -> 45
-ONE_SIGNAL_PER_BAR    = True     # False -> True
+COOLDOWN_MINUTES      = 20
+ONE_SIGNAL_PER_BAR    = False
 
-# ======== مفاتيح/فلتر ========
-REQUIRE_DONCHIAN_BREAK = True    # كان False
-REQUIRE_VWAP           = True    # كان False
-USE_MACD_FILTER        = True    # كان False
+# ======== مفاتيح/فلتر قابلة للتخفيف ========
+REQUIRE_DONCHIAN_BREAK = False  # لا تشترط كسر Donchian
+REQUIRE_VWAP           = False  # لا تشترط فوق VWAP
+USE_MACD_FILTER        = False  # MACD فقط للمعلومة
 
 # ==================== رصد الحيتان ====================
 WHALE_MIN_USDT     = 1_000_000
@@ -306,7 +302,7 @@ def save_chart(df, symbol, entry_price=None, sl=None, tps=None, title=""):
             plt.setp(ax.get_xticklabels(), visible=False)
 
         fig.autofmt_xdate()
-        path = os.path.join(CHART_DIR, f"{symbol.replace('/','')}{int(time.time())}.png")
+        path = os.path.join(CHART_DIR, f"{symbol.replace('/','_')}_{int(time.time())}.png")
         fig.savefig(path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
         plt.close(fig); return path
     except Exception as e:
@@ -355,32 +351,9 @@ def create_exchange():
             time.sleep(1.0)
     raise last_err
 
-# ==================== مساعدين للجودة / R:R / HTF ====================
-def expected_rr(entry_price, atr_value):
-    if atr_value is None or np.isnan(atr_value) or atr_value <= 0:
-        return 0.0
-    sl  = entry_price - SUPER_TREND_ATR_MULT * atr_value
-    tp1 = entry_price * TP_MULTS[0]
-    risk   = max(entry_price - sl, 1e-8)
-    reward = max(tp1 - entry_price, 0.0)
-    return reward / risk
-
-def htf_ok(exchange, symbol):
-    """فلتر 1h: فوق EMA200 و SuperTrend صاعد."""
-    try:
-        ohlcv_h = ccxt_call_with_retry(exchange.fetch_ohlcv, symbol, timeframe="1h", limit=200)
-    except Exception:
-        return False
-    dfh = pd.DataFrame(ohlcv_h, columns=["ts","open","high","low","close","volume"])
-    st_h, _, _, _ = compute_supertrend(dfh, ATR_PERIOD, SUPER_TREND_ATR_MULT)
-    ema200_h = ema(dfh["close"], 200)
-    i = len(dfh) - 1
-    if i < 1: return False
-    return (dfh["close"].iat[i] > ema200_h.iat[i]) and bool(st_h.iat[i])
-
 # ==================== منطق الدخول/الخروج ====================
-def entry_signal(r, exchange, symbol):
-    # اتجاه EMA مرن: (ema20>ema50) أو (close>ema200)
+def entry_signal(r):
+    # اتجاه EMA أكثر مرونة: يكفي (ema20>ema50) أو (close>ema200)
     ema_trend_ok = (r['ema20'] > r['ema50']) or (r['close'] > r['ema200'])
     if not bool(r['supertrend']): return False, "SuperTrend سلبي"
     if not ema_trend_ok:          return False, "اتجاه EMA سلبي"
@@ -405,15 +378,6 @@ def entry_signal(r, exchange, symbol):
     if REQUIRE_VWAP and pd.notna(r['vwap']) and r['close'] < r['vwap']:
         return False, "تحت VWAP"
 
-    # فلتر HTF 1h (إجباري لتقليل الخسائر)
-    if not htf_ok(exchange, symbol):
-        return False, "HTF(1h) غير داعم"
-
-    # شرط R:R ≥ 1.5 قبل الدخول
-    rr = expected_rr(r['close'], r['atr'])
-    if rr < 1.5:
-        return False, f"R:R منخفض ({rr:.2f}<1.5)"
-
     return True, "شروط مكتملة"
 
 def exit_signal(r, entry_price, entry_atr):
@@ -421,8 +385,7 @@ def exit_signal(r, entry_price, entry_atr):
     sl_price = entry_price - SUPER_TREND_ATR_MULT * entry_atr
     if r['close'] >= tp3:     return True, "هدف 3"
     if r['close'] <= sl_price:return True, "SL أصلي"
-    # خروج عند انقلاب ST فقط إذا السعر تحت EMA20 (فلتر ضوضاء)
-    if (not r['supertrend']) and (r['close'] < r['ema20']): return True, "ST flip + تحت EMA20"
+    if not r['supertrend']:   return True, "انعكاس SuperTrend"
     if r['rsi'] > 85:         return True, "تشبّع RSI"
     return False, ""
 
@@ -433,7 +396,7 @@ def update_signal_card_progress(txt, hits):
     for ln in lines:
         if ln.strip().startswith("• الهدف"):
             if cnt < len(hits) and hits[cnt]:
-                ln = ln.replace("⬜", "✅")
+                ln = ln.replace("⬜️", "✅")
             cnt += 1
         new_lines.append(ln)
     return "\n".join(new_lines)
@@ -456,11 +419,12 @@ def entry_checks(r):
     return checks
 
 def checks_to_reason(ch):
+    """أظهر فقط الشروط المُلزِمة حسب المفاتيح/الأعلام."""
     mapping = {
         "supertrend_bull": "SuperTrend سلبي",
         "ema_trend": "اتجاه EMA سلبي",
         "adx_ok": f"ADX < {ADX_THRESHOLD}",
-        "donch_break": "לא كسر Donchian",
+        "donch_break": "لا كسر Donchian",
         "rsi_ok": f"RSI خارج [{RSI_ENTRY_LOW}-{RSI_ENTRY_HIGH}]",
         "macd_pos": "MACD سلبي",
         "stoch_cross": "Stoch سلبي",
@@ -593,7 +557,7 @@ def run_bot():
 
                 # ===== لا صفقة → محاولة دخول =====
                 if pos is None:
-                    ok, reason = entry_signal(last, exchange, sym)
+                    ok, reason = entry_signal(last)
 
                     if ok and ONE_SIGNAL_PER_BAR:
                         last_ts = df.index[-1]
@@ -645,15 +609,15 @@ def run_bot():
 
                         card_text = (
                             f"📈 <b>{sym}</b> — <b>شراء</b>\n"
-                            f"⏱ الإطار: <code>{TIMEFRAME}</code> | محاكاة: <code>{DRY_RUN}</code>\n"
+                            f"⏱️ الإطار: <code>{TIMEFRAME}</code> | محاكاة: <code>{DRY_RUN}</code>\n"
                             f"🟢 دخول: <code>{entry_price:.4f}</code>\n"
                             f"🛡 وقف: <code>{sl:.4f}</code>\n"
                             f"🎯 الأهداف:\n"
-                            f"• الهدف 1: <code>{tps[0]:.4f}</code> ⬜\n"
-                            f"• الهدف 2: <code>{tps[1]:.4f}</code> ⬜\n"
-                            f"• الهدف 3: <code>{tps[2]:.4f}</code> ⬜\n"
+                            f"• الهدف 1: <code>{tps[0]:.4f}</code> ⬜️\n"
+                            f"• الهدف 2: <code>{tps[1]:.4f}</code> ⬜️\n"
+                            f"• الهدف 3: <code>{tps[2]:.4f}</code> ⬜️\n"
                             f"📏 ATR: <code>{entry_atr:.4f}</code>\n"
-                            f"🧠 السبب: {_esc('شروط مكتملة + HTF 1h داعم + R:R≥1.5')}\n"
+                            f"🧠 السبب: {_esc('شروط مكتملة')}\n"
                             f"🕒 وقت الفتح: <code>{datetime.now(timezone.utc).isoformat()}</code>\n"
                             f"🔗 {binance_pair_link(sym)}"
                             f"{extra}"
@@ -675,29 +639,17 @@ def run_bot():
                     entry_price = pos["entry"]; entry_atr = pos["atr"]; tps = pos["tps"]; sl = pos["sl"]
                     last_price  = float(last['close'])
 
-                    # --- إدارة بعد الأهداف ---
+                    # Trailing SL
+                    trail = last['close'] - TRAIL_ATR_MULT * last['atr']
+                    if not pd.isna(trail) and float(trail) > sl:
+                        pos["sl"] = float(trail); sl = pos["sl"]
+
                     # تعليم الأهداف
                     changed = False
                     for i, tpv in enumerate(tps):
                         if not pos["hits"][i] and last_price >= tpv:
                             pos["hits"][i] = True
                             changed = True
-
-                    # BE بعد TP1
-                    if pos["hits"][0]:
-                        pos["sl"] = max(pos["sl"], pos["entry"])  # Breakeven
-                        sl = pos["sl"]
-
-                        # Trailing SL يبدأ فقط بعد TP1
-                        trail = last['close'] - TRAIL_ATR_MULT * last['atr']
-                        if not pd.isna(trail) and float(trail) > sl:
-                            pos["sl"] = float(trail); sl = pos["sl"]
-
-                    # بعد TP2: SL ≥ entry + 0.5*ATR
-                    if pos["hits"][1]:
-                        pos["sl"] = max(pos["sl"], pos["entry"] + 0.5*pos["atr"])
-                        sl = pos["sl"]
-
                     if changed:
                         sm = signal_msgs.get(sym)
                         if sm and sm.get("id"):
@@ -709,7 +661,7 @@ def run_bot():
                     # خروج
                     hit, why = exit_signal(last, entry_price, entry_atr)
                     if last_price <= sl and not hit:
-                        hit, why = True, "Trailing SL مفعّل"
+                        hit, why = True, "Trailing SL (ATR*2)"
 
                     if hit:
                         tele_send(f"🔴 <b>إغلاق</b> {sym}\nسعر الإغلاق: <code>{last_price:.4f}</code>\nالسبب: {_esc(why)}")
@@ -726,19 +678,14 @@ def run_bot():
             time.sleep(SLEEP_SECONDS)
 
         except KeyboardInterrupt:
-            tele_send("⏹ تم إيقاف البوت من قبل المستخدم.")
+            tele_send("⏹️ تم إيقاف البوت من قبل المستخدم.")
             return
         except Exception as e:
             print("Unexpected error:", e)
             print(traceback.format_exc())
-            tele_send(f"⚠ خطأ غير متوقع:\n<code>{_esc(e)}</code>")
+            tele_send(f"⚠️ خطأ غير متوقع:\n<code>{_esc(e)}</code>")
             time.sleep(5)
 
 # ==================== تشغيل ====================
 if __name__ == "__main__":
-
     run_bot()
-
-
-
-
